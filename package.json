@@ -1,0 +1,14 @@
+{
+  "name": "snake-online",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "jannik323",
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.12.0"
+  }
+}
