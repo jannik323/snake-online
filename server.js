@@ -1,11 +1,5 @@
 const WebSocketServer = require("ws")
 
-//TODO: Add a grid (gridsize*gridsize big)
-// to store all objects on aditionally
-// this could be used for easy collision detection
-// instead of having to loop over every obstacle , apple and snake
-// old arraylist dataholder will stay ofc 
-
 let sockets = [];
 const PORT = 44444;
 let idCounter = 0;
@@ -40,7 +34,7 @@ class MessageHandler{
     addMsgHandle(type,handle){
         this[type]=handle;
     }
-} 
+}
 
 class SafeZone{
     x;y;
@@ -264,7 +258,7 @@ class Snake {
                     }else{
                         sendMessageToSnake(this,"death",{cause:"snake"+snake.username+" caused your demise"});
                     }
-                    snake.die();
+                    this.die();
                 }
                 return;
         }
@@ -485,25 +479,29 @@ const wss = new WebSocketServer.Server({ port: PORT });
 setInterval(update,gameSpeed);
 wss.on("connection", socket => {
     ++idCounter;
-    sockets.push(socket);
     socket.id=idCounter;
-    socket.username="User"+Date.now();
 
+    socket.username="User"+Date.now();
+    console.log(socket.username+" just connected!");
+    
     let randomSpawn = getRandomSpawn();
     socket.snake = new Snake(randomSpawn.x,randomSpawn.y);
-    socket.snake.id=idCounter;
+    socket.snake.id=socket.id;
+
+
+    sendMessage(socket,"init",{apples:apples,snakes:snakes,obstacles:obstacles,safezones:safezones,gridSize:gridsize,id:socket.id});
+
     snakes.push(socket.snake);
-
-    console.log(socket.username+" just connected!");
-
-    sendMessage(socket,"init",{apples:apples,snakes:snakes,obstacles:obstacles,safezones:safezones,gridSize:gridsize,id:idCounter});
-    sendMessageToAllExcept(socket,"snakespawn",socket.snake);
+    sockets.push(socket);
+    sendMessageToAll("snakespawn",socket.snake);
 
     socket.on("message",data=>msgHandler.handle(socket,data));
 
     socket.on("close", function() {
         sendMessageToAll("snakeremove",socket.id);
-        snakes = snakes.filter(s => s !== socket.snake);
+        let snakeI = snakes.findIndex(s=>s==socket.snake);
+        snakes[snakeI].die();
+        snakes.splice(snakeI,1);
         sockets = sockets.filter(s => s !== socket);
         console.log(socket.username+" just disconnected!");
     });
