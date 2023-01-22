@@ -489,7 +489,7 @@ require("greenlock-express")
 .ready((glx)=>{
     // we need the raw https server
     var server = glx.httpsServer();
-    wss = new WebSocketServer.Server({ server: server });
+    wss = new WebSocketServer.Server({ server: server ,port:PORT});
 });
 
 // wss = new WebSocketServer.Server({ port: PORT });
