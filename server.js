@@ -1,4 +1,5 @@
 const WebSocketServer = require("ws")
+var fs = require('fs');
 
 let sockets = [];
 const PORT = 44444;
@@ -475,56 +476,46 @@ for (let i = 0; i < applecount; i++) {
     apples.push(new Apple(i));
 }
 
-let wss;
+var cert = fs.readFileSync('../homepage/greenlock.d/live/jannik323.software/cert.pem', 'utf8');
+var key = fs.readFileSync('../homepage/greenlock.d/live/jannik323.software/privkey.pem', 'utf8');
+var options = {key: key, cert: cert};
+var server = require('https').createServer(options);
+const wss = new WebSocketServer.Server({ server: server});
 
-
-require("greenlock-express")
-.init({
-    packageRoot: __dirname,
-    configDir: "../homepage/greenlock.d",
-
-    maintainerEmail: "jannik323@outlook.com",
-    cluster: false
-})
-.ready((glx)=>{
-    var server = glx.httpsServer();
-    wss = new WebSocketServer.Server({ server: server});
-
-    wss.on("connection", socket => {
-        ++idCounter;
-        socket.id=idCounter;
-    
-        socket.username="User"+Date.now();
-        console.log(socket.username+" just connected!");
-        
-        let randomSpawn = getRandomSpawn();
-        socket.snake = new Snake(randomSpawn.x,randomSpawn.y);
-        socket.snake.id=socket.id;
-    
-    
-        sendMessage(socket,"init",{apples:apples,snakes:snakes,obstacles:obstacles,safezones:safezones,gridSize:gridsize,id:socket.id});
-    
-        snakes.push(socket.snake);
-        sockets.push(socket);
-        sendMessageToAll("snakespawn",socket.snake);
-    
-        socket.on("message",data=>msgHandler.handle(socket,data));
-    
-        socket.on("close", function() {
-            sendMessageToAll("snakeremove",socket.id);
-            let snakeI = snakes.findIndex(s=>s==socket.snake);
-            snakes[snakeI].die();
-            snakes.splice(snakeI,1);
-            sockets = sockets.filter(s => s !== socket);
-            console.log(socket.username+" just disconnected!");
-        });
-    
-    });
+server.listen(PORT,()=>{
+	console.log("server started!");
+	wss.on("connection", (socket,req) => {
+		++idCounter;
+		socket.id=idCounter;
+	    
+	        socket.username="User"+Date.now();
+	        console.log(socket.username+" just connected!");
+	        
+	        let randomSpawn = getRandomSpawn();
+	        socket.snake = new Snake(randomSpawn.x,randomSpawn.y);
+	        socket.snake.id=socket.id;
+	    
+	    
+	        sendMessage(socket,"init",{apples:apples,snakes:snakes,obstacles:obstacles,safezones:safezones,gridSize:gridsize,id:socket.id});
+	    
+	        snakes.push(socket.snake);
+	        sockets.push(socket);
+	        sendMessageToAll("snakespawn",socket.snake);
+	    
+	        socket.on("message",data=>msgHandler.handle(socket,data));
+	    
+	        socket.on("close", function() {
+	            sendMessageToAll("snakeremove",socket.id);
+	            let snakeI = snakes.findIndex(s=>s==socket.snake);
+	            snakes[snakeI].die();
+	            snakes.splice(snakeI,1);
+	            sockets = sockets.filter(s => s !== socket);
+	            console.log(socket.username+" just disconnected!");
+	        });
+	    
+	});
 });
 
 // wss = new WebSocketServer.Server({ port: PORT });
 
 setInterval(update,gameSpeed);
-
-
-module.exports = {sendMessage,sendMessageToAll,sendMessageToSnake};
