@@ -489,40 +489,42 @@ require("greenlock-express")
 .ready((glx)=>{
     var server = glx.httpsServer();
     wss = new WebSocketServer.Server({ server: server});
+
+    wss.on("connection", socket => {
+        ++idCounter;
+        socket.id=idCounter;
+    
+        socket.username="User"+Date.now();
+        console.log(socket.username+" just connected!");
+        
+        let randomSpawn = getRandomSpawn();
+        socket.snake = new Snake(randomSpawn.x,randomSpawn.y);
+        socket.snake.id=socket.id;
+    
+    
+        sendMessage(socket,"init",{apples:apples,snakes:snakes,obstacles:obstacles,safezones:safezones,gridSize:gridsize,id:socket.id});
+    
+        snakes.push(socket.snake);
+        sockets.push(socket);
+        sendMessageToAll("snakespawn",socket.snake);
+    
+        socket.on("message",data=>msgHandler.handle(socket,data));
+    
+        socket.on("close", function() {
+            sendMessageToAll("snakeremove",socket.id);
+            let snakeI = snakes.findIndex(s=>s==socket.snake);
+            snakes[snakeI].die();
+            snakes.splice(snakeI,1);
+            sockets = sockets.filter(s => s !== socket);
+            console.log(socket.username+" just disconnected!");
+        });
+    
+    });
 });
 
 // wss = new WebSocketServer.Server({ port: PORT });
 
 setInterval(update,gameSpeed);
-wss.on("connection", socket => {
-    ++idCounter;
-    socket.id=idCounter;
 
-    socket.username="User"+Date.now();
-    console.log(socket.username+" just connected!");
-    
-    let randomSpawn = getRandomSpawn();
-    socket.snake = new Snake(randomSpawn.x,randomSpawn.y);
-    socket.snake.id=socket.id;
-
-
-    sendMessage(socket,"init",{apples:apples,snakes:snakes,obstacles:obstacles,safezones:safezones,gridSize:gridsize,id:socket.id});
-
-    snakes.push(socket.snake);
-    sockets.push(socket);
-    sendMessageToAll("snakespawn",socket.snake);
-
-    socket.on("message",data=>msgHandler.handle(socket,data));
-
-    socket.on("close", function() {
-        sendMessageToAll("snakeremove",socket.id);
-        let snakeI = snakes.findIndex(s=>s==socket.snake);
-        snakes[snakeI].die();
-        snakes.splice(snakeI,1);
-        sockets = sockets.filter(s => s !== socket);
-        console.log(socket.username+" just disconnected!");
-    });
-
-});
 
 module.exports = {sendMessage,sendMessageToAll,sendMessageToSnake};
