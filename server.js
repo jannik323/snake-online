@@ -475,7 +475,25 @@ for (let i = 0; i < applecount; i++) {
     apples.push(new Apple(i));
 }
 
-const wss = new WebSocketServer.Server({ port: PORT });
+let wss;
+
+
+require("greenlock-express")
+.init({
+    packageRoot: __dirname,
+    configDir: "../homepage/greenlock.d",
+
+    maintainerEmail: "jannik323@outlook.com",
+    cluster: false
+})
+.ready((glx)=>{
+    // we need the raw https server
+    var server = glx.httpsServer();
+    wss = new WebSocketServer.Server({ server: server });
+});
+
+// wss = new WebSocketServer.Server({ port: PORT });
+
 setInterval(update,gameSpeed);
 wss.on("connection", socket => {
     ++idCounter;
