@@ -11,14 +11,21 @@ let safezones = [];
 
 let grid = [];
 
+const scoreBoardUpdateSpeed= 5000;
+let leaderboard = [];
+
+const maxusernameLength = 12;
+
 const safezonePerRow=2;
-const safezoneScale=2;
+const safezoneScale=0.5;
 const gameSpeed=350;
-const gridsize=50;
-const obstaclecount=5;
-const obstaclegrow=4;
-const applecount=25;
-const maxapplecount=applecount*3;
+const gridsize=100;
+const obstaclecount=20;
+const obstaclegrow=12;
+const applecount=50;
+const maxapplecount=applecount*4;
+
+const spawnCountDownTime=3;
 
 class MessageHandler{
     constructor(){
@@ -46,11 +53,11 @@ class SafeZone{
         this.size=Math.round(size);
     }
     checkCollision(x,y){
-        if(x>=this.x&&y>this.y&&x<this.x+this.size&&y<this.y+this.size)return true;
+        if(x>=this.x&&y>=this.y&&x<this.x+this.size&&y<this.y+this.size)return true;
         return false;
     }
     getSpawnPos(){
-        return {x:this.x+Math.floor(Math.random()*this.size),y:this.y+Math.floor(Math.random()*this.size)}
+        return {x:this.x+Math.floor(Math.random()*(this.size-2))+1,y:this.y+Math.floor(Math.random()*(this.size-2))+1}
     }
 }
 
@@ -85,22 +92,18 @@ class Obstacle extends GridObject{
         }
         this.gridtype="Obstacle";
     }
-    anyCollision(x,y){
-        if(this.x==x&&this.y==y)return true;
-        return false;
-    }
     randomPos(){
         do{
             this.x = Math.floor(Math.random()*gridsize);
             this.y = Math.floor(Math.random()*gridsize);
-        }while(collisionCheck(this.x,this.y)!=null);
+        }while(collisionCheck(this.x,this.y)!=null||safezoneCollision(this.x,this.y));
         this.setGridPos();
     }
     randomPosAround(){ 
         let tries=0;
         let res = {x:0,y:0};
         do{
-            if(tries>6){ 
+            if(tries>4){ 
                 return null;
             };
             switch(Math.floor(Math.random()*4)){
@@ -122,7 +125,7 @@ class Obstacle extends GridObject{
                     break;
             }
             tries++;
-        }while(collisionCheck(res.x,res.y)!=null);
+        }while(collisionCheck(res.x,res.y)!=null||safezoneCollision(res.x,res.y)||(res.x<0||res.y<0||res.x>=gridsize||res.y>=gridsize));
         return res;
     }
     grow(growam){
@@ -152,17 +155,13 @@ class Apple extends GridObject{
         }
         this.gridtype="Apple";
     }
-    anyCollision(x,y){
-        if(this.x==x&&this.y==y)return true;
-        return false;
-    }
     randomPos(){
         let oldx= this.x;
         let oldy= this.y;
         do{
             this.x = Math.floor(Math.random()*gridsize);
             this.y = Math.floor(Math.random()*gridsize);
-        }while(collisionCheck(this.x,this.y)!=null||(this.x==oldx&&this.y==oldy));
+        }while(collisionCheck(this.x,this.y)!=null||(this.x==oldx&&this.y==oldy)||safezoneCollision(this.x,this.y));
         this.setGridPos();
     }
 }
@@ -171,35 +170,21 @@ class Snake {
     head;
     dir;
     username;
-    state="a";
+    state="d";
     eaten = 0;
     length = 0;
     constructor(x,y){
         this.head=new Body(x,y,this,true);
         this.dir = {x:1,y:0};
-        this.state="a";
+        this.state="i";
     }
     
     reset(x,y){
         this.head=new Body(x,y,this,true);
         this.dir = {x:1,y:0};
-        this.state="a";
+        this.state="i";
         this.eaten = 0;
         this.length = 0;
-    }
-    headCollision(x,y){
-        if(this.state=="d")return false;
-        if(this.head.x==x&&this.head.y==y)return true;
-        return false;
-    }
-    bodyCollision(x,y){
-        if(this.state=="d")return false;
-        if(this.head.nextBody==null)return false;
-        return this.head.nextBody.bodyCollision(x,y);
-    }
-    anyCollision(x,y){
-        if(this.state=="d")return false;
-        return this.head.bodyCollision(x,y);
     }
     die(){
         let droppedApples = [];
@@ -209,7 +194,17 @@ class Snake {
             sendMessageToAll("appleadd",droppedApples);
         }
     }
+    moveNoSave(){
+        this.head.x+=this.dir.x;
+        this.head.y+=this.dir.y;
+        if(this.head.x>gridsize-1||this.head.x<0||this.head.y>gridsize-1||this.head.y<0){
+            sendMessageToSnake(this,"death",{cause:"you didn't see the border"});
+            this.die();
+            return;
+        }
+    }
     move(){
+        if(this.state=="d")return;
         if(this.head.nextBody==null){
             this.head.resetGridPos();
         }
@@ -226,25 +221,23 @@ class Snake {
         if(this.head.nextBody==null)return this.head;
         return this.head.nextBody.getTail();
     }
-    update(){
-        if(this.state=="d")return;
-
-        let toCollideWith = collisionCheck(this.head.x+this.dir.x,this.head.y+this.dir.y);
+    handleCollision(relativeX,relativeY){
+        let toCollideWith = collisionCheck(this.head.x+relativeX,this.head.y+relativeY);
 
         switch(toCollideWith){
             case "Obstacle":
                 sendMessageToSnake(this,"death",{cause:"you ran into a rock"});
                 this.die();
-                return;
+                return true;
             case "Apple":
-                let a = grid[this.head.x+this.dir.x][this.head.y+this.dir.y];
+                let a = grid[this.head.x+relativeX][this.head.y+relativeY];
                 a.resetGridPos();
                 a.randomPos();
                 sendMessageToAll("applechange", {id:a.id,x:a.x,y:a.y});
                 this.eaten++;
                 break;
             case "Body":
-                let body = grid[this.head.x+this.dir.x][this.head.y+this.dir.y];
+                let body = grid[this.head.x+relativeX][this.head.y+relativeY];
                 let snake = body.snakeRef;
                 if(snake.state=="d")break;
                 if(body.previousBody==null){
@@ -261,8 +254,41 @@ class Snake {
                     }
                     this.die();
                 }
-                return;
+                return true;
         }
+        return false;
+    }
+    update(){
+        if(this.state=="d")return;
+
+        switch(this.state){
+            case "d":return; 
+            case "i":       
+                this.moveNoSave();       
+                if(!safezoneCollision(this.head.x,this.head.y)){
+                    this.state="it";
+                    setTimeout(()=>this.state="itf",spawnCountDownTime*1000);
+                }
+                return;
+            case "it":
+                this.moveNoSave();
+                return;
+            case "itf":
+                this.state="a";
+                if(this.handleCollision(0,0)){
+                    return;
+                }
+        }
+
+        if(safezoneCollision(this.head.x+this.dir.x,this.head.y+this.dir.y)){
+            sendMessageToSnake(this,"death",{cause:"you ran into the safezone"});
+            this.die();
+            return;
+        }
+
+        if(this.handleCollision(this.dir.x,this.dir.y)){
+            return;
+        };
 
         if(this.eaten>this.length){
             this.length++;
@@ -291,13 +317,9 @@ class Body extends GridObject{
         this.gridtype="Body";
         this.setGridPos();
     }
-    bodyCollision(x,y){
-        if(this.x==x&&this.y==y)return true;
-        if(this.nextBody==null)return false;
-        return this.nextBody.bodyCollision(x,y);
-    }
     addBody(){
         if(this.nextBody!=null)return;
+        this.resetGridPos();
         this.nextBody=new Body(this.x,this.y,this);
     }
     getTail(){
@@ -305,12 +327,14 @@ class Body extends GridObject{
         return this.nextBody.getTail();
     }
     move(){
+        if(this.snakeRef.state=="d")return;
         if(this.previousBody==null)return; //the order of these is important 
         if(this.nextBody==null){
             this.resetGridPos();
         }
         this.x=this.previousBody.x;
         this.y=this.previousBody.y;
+        this.previousBody.resetGridPos();
         this.setGridPos();
         this.previousBody.move();
     }
@@ -321,22 +345,17 @@ class Body extends GridObject{
         }
     }
     dropApples(collection){
+        if(this.nextBody==null||this.nextBody.nextBody==null)return false;
 
-        if(apples.length<maxapplecount && Math.random()>0.5){
+        if(apples.length<maxapplecount && Math.random()>0.6){
             let apple = new Apple(apples.length,this.x,this.y);
             apples.push(apple);
             collection.push(apple);
-            if(this.nextBody!=null){
-                this.nextBody.dropApples(collection);
-            }
+            this.nextBody.dropApples(collection);
             return true;
         }
 
-        if(this.nextBody!=null){
-            return this.nextBody.dropApples(collection);
-        }
-
-        return false;
+        return this.nextBody.dropApples(collection);
     }
 }
 
@@ -401,6 +420,9 @@ msgHandler.addMsgHandle("msg",(socket,data)=>{
 });
 
 msgHandler.addMsgHandle("username",(socket,data)=>{
+    if(data.length>maxusernameLength){
+        data.length=data.slice(0,maxusernameLength);
+    }
     console.log(socket.username+" is now "+ data);
     socket.username=data;
     socket.snake.username=data;
@@ -428,6 +450,26 @@ msgHandler.addMsgHandle("move",(socket,data)=>{
     }
 });
 
+function updateScoreLeaderBoard(){
+    if(snakes.length==0)return;
+    let lb = snakes.map(s=>{
+        return {username:s.username,score:s.state=="d"?0:s.eaten,id:s.id}
+    });
+    lb.sort((a,b)=>b.score-a.score);
+    if(leaderboard.length!=lb.length){
+        sendMessageToAll("lb",lb.slice(0,10));
+        leaderboard=lb;
+        return;
+    }
+    for (let i = 0; i < leaderboard.length; i++) {
+        if(leaderboard[i].id!=lb[i].id||leaderboard[i].score!=lb[i].score){
+            sendMessageToAll("lb",lb.slice(0,10));
+            break;
+        }
+    }
+    leaderboard=lb;
+}
+
 function update(){
     snakes.forEach(e=>e.update());
     sockets.forEach(s=>{
@@ -445,6 +487,15 @@ function collisionCheck(x,y){
     return grid[x][y].gridtype;
 }
 
+function safezoneCollision(x,y){
+    for (let i = 0; i < safezones.length; i++) {
+        if(safezones[i].checkCollision(x,y)){
+            return true;
+        }
+    }
+    return false;
+}
+
 for (let x = 0; x < gridsize; x++) {
     grid[x] = [];
     for (let y = 0; y < gridsize; y++) {
@@ -453,10 +504,11 @@ for (let x = 0; x < gridsize; x++) {
 }
 
 {
-let stepSize = gridsize/(((safezonePerRow*safezoneScale)*2)+1);
+    let stepSize = Math.floor(gridsize/(((safezonePerRow)*2)));
+    let safeZoneSize = Math.floor(stepSize*safezoneScale);
     for (let y = 0; y < safezonePerRow; y++) {
         for (let x = 0; x < safezonePerRow; x++) {  
-            let s = new SafeZone(stepSize*((x*2*safezoneScale)+(1*safezoneScale)),stepSize*((y*2*safezoneScale)+(1*safezoneScale)),stepSize);
+            let s = new SafeZone(stepSize*((x*2)+(1))-(safeZoneSize/2),stepSize*((y*2)+(1))-(safeZoneSize/2),safeZoneSize);
             safezones.push(s);
         }
     }
@@ -516,6 +568,46 @@ server.listen(PORT,()=>{
 	});
 });
 
-// wss = new WebSocketServer.Server({ port: PORT });
+// const wss = new WebSocketServer.Server({ port: PORT });
+// console.log("server started");
+// wss.on("connection", (socket,req) => {
+//     ++idCounter;
+//     socket.id=idCounter;
+    
+//         socket.username="User"+Date.now();
+//         console.log(socket.username+" just connected!");
+        
+//         let randomSpawn = getRandomSpawn();
+//         socket.snake = new Snake(randomSpawn.x,randomSpawn.y);
+//         socket.snake.id=socket.id;
+    
+    
+//         sendMessage(socket,"init",{
+//             apples:apples,
+//             snakes:snakes,
+//             obstacles:obstacles,
+//             safezones:safezones,
+//             gridSize:gridsize,
+//             id:socket.id,
+//             spawnCountDownTime:spawnCountDownTime,
+//         });
+    
+//         snakes.push(socket.snake);
+//         sockets.push(socket);
+//         sendMessageToAll("snakespawn",socket.snake);
+    
+//         socket.on("message",data=>msgHandler.handle(socket,data));
+    
+//         socket.on("close", function() {
+//             sendMessageToAll("snakeremove",socket.id);
+//             let snakeI = snakes.findIndex(s=>s==socket.snake);
+//             snakes[snakeI].die();
+//             snakes.splice(snakeI,1);
+//             sockets = sockets.filter(s => s !== socket);
+//             console.log(socket.username+" just disconnected!");
+//         });
+    
+// });
 
 setInterval(update,gameSpeed);
+setInterval(updateScoreLeaderBoard,scoreBoardUpdateSpeed);
