@@ -1,6 +1,9 @@
 const WebSocketServer = require("ws")
 var fs = require('fs');
 
+//TODO: instead of a set 70% for body turning stone on death
+// have each body get 4% or smth more chance for it to turn, start with 0
+
 let sockets = [];
 const PORT = 44444;
 let idCounter = 0;
