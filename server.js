@@ -15,16 +15,17 @@ let grid = [];
 
 const scoreBoardUpdateSpeed= 5000;
 let leaderboard = [];
+let highscoreObj = {usr:"Jannik323",score:-999};
 
 const maxusernameLength = 12;
 
 const safezonePerRow=2;
-const safezoneScale=0.5;
+const safezoneScale=0.4;
 const gameSpeed=350;
 const gridsize=100;
-const obstaclecount=20;
+const obstaclecount=22;
 const obstaclegrow=12;
-const applecount=50;
+const applecount=60;
 const maxapplecount=applecount*4;
 
 const spawnCountDownTime=3;
@@ -533,6 +534,13 @@ function updateScoreLeaderBoard(){
         return {username:s.username,score:s.state=="d"?0:s.eaten,id:s.id}
     });
     lb.sort((a,b)=>b.score-a.score);
+
+    if(lb[0].score>highscoreObj.score){
+        highscoreObj.usr=lb[0].username;
+        highscoreObj.score=lb[0].score;
+        sendMessageToAll("highscore",highscoreObj);
+    }
+
     if(leaderboard.length!=lb.length){
         sendMessageToAll("lb",lb.slice(0,10));
         leaderboard=lb;
@@ -607,86 +615,67 @@ for (let i = 0; i < applecount; i++) {
     apples.push(new Apple(i));
 }
 
+//Prod
+
 var cert = fs.readFileSync('../homepage/greenlock.d/live/jannik323.software/cert.pem', 'utf8');
 var key = fs.readFileSync('../homepage/greenlock.d/live/jannik323.software/privkey.pem', 'utf8');
 var options = {key: key, cert: cert};
 var server = require('https').createServer(options);
 const wss = new WebSocketServer.Server({ server: server});
-
 server.listen(PORT,()=>{
-	console.log("server started!");
-	wss.on("connection", (socket,req) => {
-		++idCounter;
-		socket.id=idCounter;
-	    
-	        socket.username="User"+Date.now();
-	        console.log(socket.username+" just connected!");
-	        
-	        let randomSpawn = getRandomSpawn();
-	        socket.snake = new Snake(randomSpawn.x,randomSpawn.y);
-	        socket.snake.id=socket.id;
-	    
-	    
-	        sendMessage(socket,"init",{apples:apples,snakes:snakes,obstacles:obstacles,safezones:safezones,gridSize:gridsize,id:socket.id});
-	    
-	        snakes.push(socket.snake);
-	        sockets.push(socket);
-	        sendMessageToAll("snakespawn",socket.snake);
-	    
-	        socket.on("message",data=>msgHandler.handle(socket,data));
-	    
-	        socket.on("close", function() {
-	            sendMessageToAll("snakeremove",socket.id);
-	            let snakeI = snakes.findIndex(s=>s==socket.snake);
-	            snakes[snakeI].die();
-	            snakes.splice(snakeI,1);
-	            sockets = sockets.filter(s => s !== socket);
-	            console.log(socket.username+" just disconnected!");
-	        });
-	    
-	});
+	wssSetup();
 });
 
-// const wss = new WebSocketServer.Server({ port: PORT });
-// console.log("server started");
-// wss.on("connection", (socket,req) => {
-//     ++idCounter;
-//     socket.id=idCounter;
-    
-//         socket.username="User"+Date.now();
-//         console.log(socket.username+" just connected!");
-        
-//         let randomSpawn = getRandomSpawn();
-//         socket.snake = new Snake(randomSpawn.x,randomSpawn.y);
-//         socket.snake.id=socket.id;
-    
-    
-//         sendMessage(socket,"init",{
-//             apples:apples,
-//             snakes:snakes,
-//             obstacles:obstacles,
-//             safezones:safezones,
-//             gridSize:gridsize,
-//             id:socket.id,
-//             spawnCountDownTime:spawnCountDownTime,
-//         });
-    
-//         snakes.push(socket.snake);
-//         sockets.push(socket);
-//         sendMessageToAll("snakespawn",socket.snake);
-    
-//         socket.on("message",data=>msgHandler.handle(socket,data));
-    
-//         socket.on("close", function() {
-//             sendMessageToAll("snakeremove",socket.id);
-//             let snakeI = snakes.findIndex(s=>s==socket.snake);
-//             snakes[snakeI].die();
-//             snakes.splice(snakeI,1);
-//             sockets = sockets.filter(s => s !== socket);
-//             console.log(socket.username+" just disconnected!");
-//         });
-    
+
+//Debug 
+
+// const wss = new WebSocketServer.Server({ port: PORT },()=>{
+//     wssSetup();
 // });
+
+
+function wssSetup(){
+    console.log("server started");
+    wss.on("connection", (socket,req) => {
+        ++idCounter;
+        socket.id=idCounter;
+        
+        socket.username="User"+Date.now();
+        console.log(socket.username+" just connected!");
+        
+        let randomSpawn = getRandomSpawn();
+        socket.snake = new Snake(randomSpawn.x,randomSpawn.y);
+        socket.snake.id=socket.id;
+    
+        sendMessage(socket,"init",{
+            apples:apples,
+            snakes:snakes,
+            obstacles:obstacles,
+            safezones:safezones,
+            gridSize:gridsize,
+            id:socket.id,
+            spawnCountDownTime:spawnCountDownTime,
+        });
+    
+        snakes.push(socket.snake);
+        sockets.push(socket);
+        sendMessage(socket,"lb",leaderboard.slice(0,10));
+        sendMessage(socket,"highscore",highscoreObj);
+        
+        sendMessageToAll("snakespawn",socket.snake);
+    
+        socket.on("message",data=>msgHandler.handle(socket,data));
+    
+        socket.on("close", function() {
+            sendMessageToAll("snakeremove",socket.id);
+            let snakeI = snakes.findIndex(s=>s==socket.snake);
+            snakes[snakeI].die();
+            snakes.splice(snakeI,1);
+            sockets = sockets.filter(s => s !== socket);
+            console.log(socket.username+" just disconnected!");
+        });
+    });
+}
 
 setInterval(update,gameSpeed);
 setInterval(updateScoreLeaderBoard,scoreBoardUpdateSpeed);
