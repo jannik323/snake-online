@@ -6,8 +6,10 @@ const PORT = 44444;
 let idCounter = 0;
 let apples = [];
 let obstacles = [];
+let obstacleId = 0;
 let snakes = [];
 let safezones = [];
+let lasers = [];
 
 let grid = [];
 
@@ -61,6 +63,39 @@ class SafeZone{
     }
 }
 
+class Laser{
+    x;y;
+    dir={x:0,y:0};
+    usedUp=false;
+    constructor(x,y,dir){
+        this.dir.x=dir.x;
+        this.dir.y=dir.y;
+        this.x=x+dir.x;
+        this.y=y+dir.y;
+    }
+    update(){
+        if(this.usedUp)return;
+        if(safezoneCollision(this.x,this.y)||(this.x<0||this.y<0||this.x>=gridsize||this.y>=gridsize)){
+            this.usedUp=true;
+            return;
+        }
+        switch(collisionCheck(this.x,this.y)){
+            case "Obstacle":
+                this.usedUp=true;
+                grid[this.x][this.y].remove();
+                return;
+            case "Apple":
+                this.usedUp=true;
+                return;
+            case "Body":
+                this.usedUp=true;
+                return;
+        }
+        this.x+=this.dir.x;
+        this.y+=this.dir.y;
+    }
+}
+
 class GridObject{
     gridtype;
     x;y;
@@ -70,6 +105,10 @@ class GridObject{
     }
     setGridPos(){
         if(this.x<0||this.y<0||this.x>=gridsize||this.y>=gridsize)return;
+        if(grid[this.x][this.y]!=null){
+            console.error("illegal override:");
+            console.log(grid[this.x][this.y])
+        }
         grid[this.x][this.y]=this;
     }
     resetGridPos(){
@@ -80,9 +119,9 @@ class GridObject{
 
 class Obstacle extends GridObject{
     id;
-    constructor(id,x=null,y=null){
+    constructor(x=null,y=null){
         super();
-        this.id=id;
+        this.id=++obstacleId;
         if(x==null||y==null){
             this.randomPos();
         }else{
@@ -134,10 +173,20 @@ class Obstacle extends GridObject{
         for (let i = 0; i < growam; i++) {
             let res = this.randomPosAround();
             if(res==null)return;
-            let obstacle = new Obstacle(obstacles.length,res.x,res.y);
+            let obstacle = new Obstacle(res.x,res.y);
             obstacles.push(obstacle);
             obstacle.grow(growam);
         }
+    }
+    remove(){
+        let i = obstacles.findIndex(o=>o.id==this.id);
+        if(i==-1){
+            console.error("tried removing non existing obstacle:"+ this);
+            return;
+        }
+        sendMessageToAll("obstacleremove",this.id);
+        this.resetGridPos();
+        obstacles.splice(i,1);
     }
 }
 
@@ -173,6 +222,7 @@ class Snake {
     state="d";
     eaten = 0;
     length = 0;
+    shoot=false;
     constructor(x,y){
         this.head=new Body(x,y,this,true);
         this.dir = {x:1,y:0};
@@ -187,11 +237,15 @@ class Snake {
         this.length = 0;
     }
     die(){
-        let droppedApples = [];
+        let stoneTurned = [];
         this.state="d";
         this.head.die();
-        if(this.head.nextBody!=null&&this.head.nextBody.dropApples(droppedApples)){
-            sendMessageToAll("appleadd",droppedApples);
+        // let droppedApples = [];
+        // if(this.head.nextBody!=null&&this.head.nextBody.dropApples(droppedApples)){
+        //     sendMessageToAll("appleadd",droppedApples);
+        // }
+        if(this.head.nextBody!=null&&this.head.nextBody.turnToStone(stoneTurned)){
+            sendMessageToAll("obstacleadd",stoneTurned);
         }
     }
     moveNoSave(){
@@ -204,7 +258,6 @@ class Snake {
         }
     }
     move(){
-        if(this.state=="d")return;
         if(this.head.nextBody==null){
             this.head.resetGridPos();
         }
@@ -290,6 +343,8 @@ class Snake {
             return;
         };
 
+        if(this.state=="d")return;
+
         if(this.eaten>this.length){
             this.length++;
             this.getTail().addBody();
@@ -297,6 +352,12 @@ class Snake {
 
         this.getTail().move();
         this.move();
+
+        if(this.shoot){
+            this.shoot=false;
+            let nl = new Laser(this.head.x,this.head.y,this.dir);
+            lasers.push(nl);
+        }
     }
 }
 
@@ -327,7 +388,6 @@ class Body extends GridObject{
         return this.nextBody.getTail();
     }
     move(){
-        if(this.snakeRef.state=="d")return;
         if(this.previousBody==null)return; //the order of these is important 
         if(this.nextBody==null){
             this.resetGridPos();
@@ -356,6 +416,19 @@ class Body extends GridObject{
         }
 
         return this.nextBody.dropApples(collection);
+    }
+    turnToStone(collection){
+        if(this.nextBody==null||this.nextBody.nextBody==null)return false;
+
+        if(Math.random()>0.3){
+            let obstacle = new Obstacle(this.x,this.y);
+            obstacles.push(obstacle);
+            collection.push(obstacle);
+            this.nextBody.turnToStone(collection);
+            return true;
+        }
+
+        return this.nextBody.turnToStone(collection);
     }
 }
 
@@ -391,8 +464,8 @@ function getSocketFromSnake(snake){
 function defaultReplacer(key,value){
     if (key=="previousBody") return undefined;
     else if (key=="snakeRef") return undefined;
-    else if (value!=null&&value.state=="d") return undefined;
     else if (key=="gridtype") return undefined;
+    else if (key=="shoot") return undefined;
     return value;
 }
 
@@ -401,6 +474,7 @@ function updateReplacer(key,value){
     else if (key=="gridtype") return undefined;
     else if (key=="snakeRef") return undefined;
     else if (key=="length") return undefined;
+    else if (key=="shoot") return undefined;
     else if (key=="username") return undefined;
     return value;
 }
@@ -415,7 +489,7 @@ msgHandler.addMsgHandle("restart",(socket,data)=>{
 
 msgHandler.addMsgHandle("msg",(socket,data)=>{
     sockets.forEach(s=>{
-        sendMessage(s,"msg",socket.username+": "+data);
+        sendMessage(s,"msg",{usr:socket.username,msg:data});
     })
 });
 
@@ -429,7 +503,7 @@ msgHandler.addMsgHandle("username",(socket,data)=>{
     sendMessageToAll("username",{id:socket.id,username:data});
 });
 
-msgHandler.addMsgHandle("move",(socket,data)=>{
+msgHandler.addMsgHandle("input",(socket,data)=>{
     switch(data){
         case "up":
             socket.snake.dir.x=0;
@@ -446,6 +520,9 @@ msgHandler.addMsgHandle("move",(socket,data)=>{
         case "right":
             socket.snake.dir.x=1;
             socket.snake.dir.y=0;
+        break;
+        case "shoot":
+            socket.snake.shoot=true;
         break;
     }
 });
@@ -471,6 +548,8 @@ function updateScoreLeaderBoard(){
 }
 
 function update(){
+    lasers.forEach(l=>l.update());
+    lasers.filter(l=>!l.usedUp);
     snakes.forEach(e=>e.update());
     sockets.forEach(s=>{
         sendMessage(s,"snakechange",snakes,updateReplacer);
@@ -515,7 +594,7 @@ for (let x = 0; x < gridsize; x++) {
 }
 let startObstacles = [];
 for (let i = 0; i < obstaclecount; i++) {
-    let o = new Obstacle(i);
+    let o = new Obstacle();
     obstacles.push(o);
     startObstacles.push(o);
 }
