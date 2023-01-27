@@ -4,9 +4,16 @@ var fs = require('fs');
 //TODO: instead of a set 70% for body turning stone on death
 // have each body get 4% or smth more chance for it to turn, start with 0
 
+//TODO: for the init problems (some msgs get send before the socket has been initialised)
+// just chache the msg on the client in some list
+// and when its init TIME then go though the list after the init and redo those
+// simple
+
 let sockets = [];
+let chat = [];
 const PORT = 44444;
 let idCounter = 0;
+
 let apples = [];
 let obstacles = [];
 let obstacleId = 0;
@@ -18,7 +25,7 @@ let grid = [];
 
 const scoreBoardUpdateSpeed= 5000;
 let leaderboard = [];
-let highscoreObj = {usr:"Jannik323",score:-999};
+let highscoreObj;
 
 const maxusernameLength = 12;
 
@@ -30,8 +37,21 @@ const obstaclecount=22;
 const obstaclegrow=12;
 const applecount=60;
 const maxapplecount=applecount*4;
+const fullresetTime = 3600000*24; //  3600000 = 1 hour
 
 const spawnCountDownTime=3;
+
+let gameState = 0;
+
+
+let history = [];
+if(fs.existsSync("./history.json")){
+    history = JSON.parse(fs.readFileSync("./history.json",{encoding:"utf8"}));
+}else{
+    fs.writeFile("./history.json",JSON.stringify(history),()=>{
+        console.log("created history.json file.");
+    });
+}
 
 class MessageHandler{
     constructor(){
@@ -111,7 +131,7 @@ class GridObject{
         if(this.x<0||this.y<0||this.x>=gridsize||this.y>=gridsize)return;
         if(grid[this.x][this.y]!=null){
             console.error("illegal override:");
-            console.log(grid[this.x][this.y])
+            console.log(grid[this.x][this.y].gridtype+" at :"+this.x+","+this.y);
         }
         grid[this.x][this.y]=this;
     }
@@ -483,6 +503,12 @@ function updateReplacer(key,value){
     return value;
 }
 
+function checkChatOverflow(){
+    if(chat.length>20){
+        chat.splice(0,1);
+    }
+}
+
 let msgHandler = new MessageHandler();
 
 msgHandler.addMsgHandle("restart",(socket,data)=>{
@@ -492,16 +518,23 @@ msgHandler.addMsgHandle("restart",(socket,data)=>{
 });
 
 msgHandler.addMsgHandle("msg",(socket,data)=>{
+    let msg = {usr:socket.username,msg:data};
     sockets.forEach(s=>{
-        sendMessage(s,"msg",{usr:socket.username,msg:data});
+        sendMessage(s,"msg",msg);
     })
+    chat.push(msg);
+    checkChatOverflow();
 });
 
 msgHandler.addMsgHandle("username",(socket,data)=>{
     if(data.length>maxusernameLength){
         data.length=data.slice(0,maxusernameLength);
     }
-    console.log(socket.username+" is now "+ data);
+    if(!socket.hasusername){
+        sendServerTextMessage(data+ " has joined!");
+    }else{
+        sendServerTextMessage(socket.username+" is now "+ data+"!");
+    }
     socket.username=data;
     socket.snake.username=data;
     sendMessageToAll("username",{id:socket.id,username:data});
@@ -525,14 +558,23 @@ msgHandler.addMsgHandle("input",(socket,data)=>{
             socket.snake.dir.x=1;
             socket.snake.dir.y=0;
         break;
-        case "shoot":
-            socket.snake.shoot=true;
-        break;
+        // case "shoot":
+        //     socket.snake.shoot=true;
+        // break;
     }
 });
 
+function sendServerTextMessage(msg){
+    sockets.forEach(s=>{
+        sendMessage(s,"sysmsg",msg);
+    })
+    chat.push({system:true,msg:msg});
+    checkChatOverflow();
+}
+
 function updateScoreLeaderBoard(){
     if(snakes.length==0)return;
+    if(gameState==0)return;
     let lb = snakes.map(s=>{
         return {username:s.username,score:s.state=="d"?0:s.eaten,id:s.id}
     });
@@ -559,12 +601,22 @@ function updateScoreLeaderBoard(){
 }
 
 function update(){
+    if(gameState==0)return;
     lasers.forEach(l=>l.update());
     lasers.filter(l=>!l.usedUp);
     snakes.forEach(e=>e.update());
+    if(gameState==0)return;
     sockets.forEach(s=>{
         sendMessage(s,"snakechange",snakes,updateReplacer);
     })
+}
+
+async function waitFor(seconds){
+    return new Promise((res)=>{
+        setTimeout(()=>{
+            res();
+        },seconds*1000);
+    });
 }
 
 function getRandomSpawn(){
@@ -586,14 +638,55 @@ function safezoneCollision(x,y){
     return false;
 }
 
-for (let x = 0; x < gridsize; x++) {
-    grid[x] = [];
-    for (let y = 0; y < gridsize; y++) {
-        grid[x][y] = null;
+function setupPlayer(socket){
+    let randomSpawn = getRandomSpawn();
+    socket.snake = new Snake(randomSpawn.x,randomSpawn.y);
+    socket.snake.id=socket.id;
+    socket.snake.username=socket.username;
+
+    sendMessage(socket,"init",{
+        apples:apples,
+        snakes:snakes,
+        obstacles:obstacles,
+        safezones:safezones,
+        gridSize:gridsize,
+        id:socket.id,
+        spawnCountDownTime:spawnCountDownTime,
+        hc:highscoreObj,
+        lb:leaderboard.slice(0,10)
+    });
+
+    snakes.push(socket.snake);
+    if(sockets.indexOf(socket)==-1){
+        sockets.push(socket);
     }
+
+    sendMessageToAll("snakespawn",socket.snake);
 }
 
-{
+function setupGame(){
+    //grid setup
+    grid=[];
+    apples = [];
+    obstacles = [];
+    obstacleId = 0;
+    snakes = [];
+    safezones = [];
+    lasers = [];
+
+    highscoreObj = {usr:"Jannik323",score:-1};
+    leaderboard = [];
+
+
+    for (let x = 0; x < gridsize; x++) {
+        grid[x] = [];
+        for (let y = 0; y < gridsize; y++) {
+            grid[x][y] = null;
+        }
+    }
+
+    //safezones
+    
     let stepSize = Math.floor(gridsize/(((safezonePerRow)*2)));
     let safeZoneSize = Math.floor(stepSize*safezoneScale);
     for (let y = 0; y < safezonePerRow; y++) {
@@ -602,40 +695,84 @@ for (let x = 0; x < gridsize; x++) {
             safezones.push(s);
         }
     }
-}
-let startObstacles = [];
-for (let i = 0; i < obstaclecount; i++) {
-    let o = new Obstacle();
-    obstacles.push(o);
-    startObstacles.push(o);
+
+    //obstacle setup
+    let startObstacles = [];
+    for (let i = 0; i < obstaclecount; i++) {
+        let o = new Obstacle();
+        obstacles.push(o);
+        startObstacles.push(o);
+    }
+
+    //obstacle grow setup
+    for (let i = 0; i < startObstacles.length; i++) {
+        startObstacles[i].grow(obstaclegrow);
+    }
+
+    //apple setup
+    for (let i = 0; i < applecount; i++) {
+        apples.push(new Apple(i));
+    }
+
+    gameState=1;
 }
 
-for (let i = 0; i < startObstacles.length; i++) {
-    startObstacles[i].grow(obstaclegrow);
+async function resetGame(){
+    console.log("server resetting");
+    gameState=0;
+    sendMessageToAll("gamereset",null);
+    sendServerTextMessage("game resetting!");
+    if(highscoreObj.score!=-1){
+        history.push({data:highscoreObj,date:new Date().toDateString()});
+        fs.writeFile("./history.json",JSON.stringify(history),()=>{
+            console.log("updated history.json file.");
+        });
+    }
+    await waitFor(1);
+    setupGame();
+    sockets.forEach(s=>setupPlayer(s));
 }
 
-for (let i = 0; i < applecount; i++) {
-    apples.push(new Apple(i));
-}
+setupGame();
 
 //Prod
 
 var cert = fs.readFileSync('../homepage/greenlock.d/live/jannik323.software/cert.pem', 'utf8');
 var key = fs.readFileSync('../homepage/greenlock.d/live/jannik323.software/privkey.pem', 'utf8');
 var options = {key: key, cert: cert};
-var server = require('https').createServer(options);
+var server = require('https').createServer(options,handleHTTPRequest);
 const wss = new WebSocketServer.Server({ server: server});
-server.listen(PORT,()=>{
-	wssSetup();
-});
 
 
 //Debug 
+// let server = require("http").createServer(handleHTTPRequest);
+// const wss = new WebSocketServer.Server({server:server});
 
-// const wss = new WebSocketServer.Server({ port: PORT },()=>{
-//     wssSetup();
-// });
 
+server.listen(PORT,()=>{
+    wssSetup();
+})
+
+function handleHTTPRequest(req,res){
+    if(req.url=="/history"){
+        let historyString = JSON.stringify(history);
+        res.writeHead(200,{
+            "Content-Length":Buffer.byteLength(historyString),
+            "Content-Type":"json"
+        }).end(historyString);
+    }else if(req.url=="/highscore"){
+        let highscoreString = JSON.stringify(highscoreObj);
+        res.writeHead(200,{
+            "Content-Length":Buffer.byteLength(highscoreString),
+            "Content-Type":"json"
+        }).end(highscoreString);
+    }else{
+        res.writeHead(404,{
+            "Content-Length":Buffer.byteLength("404 not found"),
+            "Content-Type":"text/plain"
+        }).end("404 not found");
+    }
+}
 
 function wssSetup(){
     console.log("server started");
@@ -644,29 +781,13 @@ function wssSetup(){
         socket.id=idCounter;
         
         socket.username="User"+Date.now();
-        console.log(socket.username+" just connected!");
-        
-        let randomSpawn = getRandomSpawn();
-        socket.snake = new Snake(randomSpawn.x,randomSpawn.y);
-        socket.snake.id=socket.id;
-    
-        sendMessage(socket,"init",{
-            apples:apples,
-            snakes:snakes,
-            obstacles:obstacles,
-            safezones:safezones,
-            gridSize:gridsize,
-            id:socket.id,
-            spawnCountDownTime:spawnCountDownTime,
-        });
-    
-        snakes.push(socket.snake);
-        sockets.push(socket);
-        sendMessage(socket,"lb",leaderboard.slice(0,10));
-        sendMessage(socket,"highscore",highscoreObj);
-        
-        sendMessageToAll("snakespawn",socket.snake);
-    
+        socket.hasusername=false;
+
+        sendMessage(socket,"msginit",chat);
+        if(gameState==1){
+            setupPlayer(socket);
+        }
+
         socket.on("message",data=>msgHandler.handle(socket,data));
     
         socket.on("close", function() {
@@ -675,10 +796,11 @@ function wssSetup(){
             snakes[snakeI].die();
             snakes.splice(snakeI,1);
             sockets = sockets.filter(s => s !== socket);
-            console.log(socket.username+" just disconnected!");
+            sendServerTextMessage(socket.username+" has left!");
         });
     });
 }
 
 setInterval(update,gameSpeed);
 setInterval(updateScoreLeaderBoard,scoreBoardUpdateSpeed);
+setInterval(resetGame,fullresetTime);
