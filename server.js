@@ -769,6 +769,7 @@ server.listen(PORT,()=>{
 })
 
 function handleHTTPRequest(req,res){
+    res.setHeader("Access-Control-Allow-Origin","https://jannik323.software");
     if(req.url=="/history"){
         let historyString = JSON.stringify(history);
         res.writeHead(200,{
