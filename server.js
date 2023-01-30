@@ -9,6 +9,13 @@ var fs = require('fs');
 // and when its init TIME then go though the list after the init and redo those
 // simple
 
+//TODO: make self collision by running backwards server side impossible 
+// movement to right and wanting to change to left for example
+
+//TODO: winner comment -> when you die and have the highscore , then you can submit a winner comment that gets displayed along highscore and name when you win a round
+
+//TODO: custom snake skins?
+
 let sockets = [];
 let chat = [];
 const PORT = 44444;
@@ -28,6 +35,7 @@ let leaderboard = [];
 let highscoreObj;
 
 const maxusernameLength = 12;
+const maxTextMsgLength = 64;
 
 const safezonePerRow=2;
 const safezoneScale=0.4;
@@ -37,7 +45,9 @@ const obstaclecount=22;
 const obstaclegrow=12;
 const applecount=60;
 const maxapplecount=applecount*4;
+
 const fullresetTime = 3600000*24; //  3600000 = 1 hour
+let fullresetTimeDate = Date.now()+fullresetTime;
 
 const spawnCountDownTime=3;
 
@@ -518,6 +528,9 @@ msgHandler.addMsgHandle("restart",(socket,data)=>{
 });
 
 msgHandler.addMsgHandle("msg",(socket,data)=>{
+    if(data.length>maxTextMsgLength){
+        data=data.slice(0,maxTextMsgLength);
+    }
     let msg = {usr:socket.username,msg:data};
     sockets.forEach(s=>{
         sendMessage(s,"msg",msg);
@@ -528,7 +541,7 @@ msgHandler.addMsgHandle("msg",(socket,data)=>{
 
 msgHandler.addMsgHandle("username",(socket,data)=>{
     if(data.length>maxusernameLength){
-        data.length=data.slice(0,maxusernameLength);
+        data=data.slice(0,maxusernameLength);
     }
     if(!socket.hasusername){
         sendServerTextMessage(data+ " has joined!");
@@ -653,7 +666,8 @@ function setupPlayer(socket){
         id:socket.id,
         spawnCountDownTime:spawnCountDownTime,
         hc:highscoreObj,
-        lb:leaderboard.slice(0,10)
+        lb:leaderboard.slice(0,10),
+        frT:fullresetTimeDate,
     });
 
     snakes.push(socket.snake);
@@ -719,6 +733,7 @@ function setupGame(){
 
 async function resetGame(){
     console.log("server resetting");
+    fullresetTimeDate = Date.now()+fullresetTime;
     gameState=0;
     sendMessageToAll("gamereset",null);
     sendServerTextMessage("game resetting!");
