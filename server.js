@@ -454,7 +454,7 @@ class Body extends GridObject{
     turnToStone(collection){
         if(this.nextBody==null||this.nextBody.nextBody==null)return false;
 
-        if(Math.random()>0.3){
+        if(Math.random()>0.5){
             let obstacle = new Obstacle(this.x,this.y);
             obstacles.push(obstacle);
             collection.push(obstacle);
@@ -556,18 +556,30 @@ msgHandler.addMsgHandle("username",(socket,data)=>{
 msgHandler.addMsgHandle("input",(socket,data)=>{
     switch(data){
         case "up":
+            if(socket.snake.dir.y==1&&socket.snake.length>0){
+                break;
+            }
             socket.snake.dir.x=0;
             socket.snake.dir.y=-1;
         break;
         case "down":
+            if(socket.snake.dir.y==-1&&socket.snake.length>0){
+                break;
+            }
             socket.snake.dir.x=0;
             socket.snake.dir.y=1;
         break;
         case "left":
+            if(socket.snake.dir.x==1&&socket.snake.length>0){
+                break;
+            }
             socket.snake.dir.x=-1;
             socket.snake.dir.y=0;
         break;
         case "right":
+            if(socket.snake.dir.x==-1&&socket.snake.length>0){
+                break;
+            }
             socket.snake.dir.x=1;
             socket.snake.dir.y=0;
         break;
